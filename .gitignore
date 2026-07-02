@@ -1,0 +1,32 @@
+```
+# Godot-specific ignores
+*.import
+*.remap
+export_presets.cfg
+.radiant_vcs/
+.radiant_editor/
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+*.dmg
+*.msi
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+```
