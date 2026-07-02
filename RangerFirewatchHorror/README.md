@@ -102,8 +102,29 @@ RangerFirewatchHorror/
 The main scene (`scenes/main.tscn`) will load with:
 - Sample zones pre-configured
 - Sample cameras registered
-- Interactive buttons demonstrating core mechanics
+- **Enhanced interactive demo** with keyboard support and testing tools
 - Live log showing all system events
+
+## Interactive Demo Features (scenes/main.gd)
+
+The demo is now much more powerful for testing the horror systems:
+
+**Keyboard Controls:**
+- **L** – Log anomaly
+- **E** – Escalate to HQ
+- **I** – Investigate field
+- **R** – Review footage
+- **1-4** – Move simulated player to different zones (North / Tower / Dam / Edge)
+- **5** – Test Self-Sighting on a distant camera (only works in Late game)
+- **0** – Force a census mismatch on a random zone
+
+**Other improvements:**
+- Credibility meter now disables the Escalate button when too low
+- Status bar shows current phase + simulated player zone
+- Zone panel shows live risk tier / bleed status
+- Escalate button now simulates realistic HQ resolution with phase-aware outcomes
+- Review footage button demonstrates Retroactive Dread with scrub result
+- Horror events now auto-trigger as you advance shifts (especially Mid/Late)
 
 ## Key Design Decisions
 
