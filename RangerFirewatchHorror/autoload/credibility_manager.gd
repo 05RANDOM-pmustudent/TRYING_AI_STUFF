@@ -59,7 +59,6 @@ func resolve_report(outcome: ReportOutcome) -> void:
 			genuine_reports += 1
 			adjust_credibility(10.0)   # Reward for catching real anomalies
 	
-	total_reports_made += 1
 	response_timer_active = false
 	pending_report_id = ""
 
@@ -88,11 +87,11 @@ func check_threshold_crossings(old_value: float, new_value: float) -> void:
 		var threshold_name = threshold_data[0]
 		var threshold_value = threshold_data[1]
 		
-		var was_below = old_value < threshold_value
+	var was_below = old_value < threshold_value
 		var is_below = new_value < threshold_value
 		
-		if was_below != is_below:
-			crossed_above = not is_below
+	if was_below != is_below:
+			var crossed_above = not is_below
 			credibility_threshold_crossed.emit(threshold_name, crossed_above)
 
 func update_hq_response_type() -> void:
