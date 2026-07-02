@@ -14,6 +14,10 @@ extends Node
 var current_zone_data: Dictionary = {}
 var sample_zones_initialized: bool = false
 
+# Simulated player position for Self-Sighting (Section 8.3) testing
+var player_sim_pos: Vector2 = Vector2(50, 50)  # Start near tower-ish
+var player_sim_zone: String = "zone_tower"
+
 func _ready() -> void:
 	# Initialize sample zones for testing
 	_initialize_sample_zones()
@@ -37,7 +41,7 @@ func _ready() -> void:
 	ZoneManager.census_mismatch_detected.connect(_on_census_mismatch)
 	
 	EscalationManager.escalation_phase_changed.connect(_on_escalation_phase_changed)
-	EscalationManager.horror_event_triggered.connect(_on_horror_event)
+	EscalationManager.horror_event_triggered.connect(_on_horror_event_triggered)
 	
 	FootageArchive.retroactive_anomaly_detected.connect(_on_retroactive_anomaly)
 	
@@ -50,6 +54,9 @@ func _ready() -> void:
 	# Start first shift
 	GameManager.start_new_shift()
 	_update_ui()
+	
+	# Populate ZonePanel with basic zone status (demo)
+	_populate_zone_panel()
 
 func _initialize_sample_zones() -> void:
 	if sample_zones_initialized:
@@ -126,12 +133,20 @@ func _initialize_sample_cameras() -> void:
 		CameraSystem.register_camera(cam_data)
 
 func _update_ui() -> void:
-	status_label.text = "Shift %d - %s" % [GameManager.current_shift, GameManager.ShiftPhase.keys()[GameManager.current_phase]]
+	var phase_str = EscalationManager.GamePhase.keys()[EscalationManager.current_phase]
+	status_label.text = "Shift %d | %s | Phase: %s | Player: %s" % [
+		GameManager.current_shift, 
+		GameManager.ShiftPhase.keys()[GameManager.current_phase],
+		phase_str,
+		player_sim_zone
+	]
 	shift_timer.text = "Time: " + GameManager.get_time_remaining_formatted()
 	credibility_meter.value = CredibilityManager.current_credibility
 
 func _on_shift_started(shift_number: int) -> void:
 	hq_message_log.append_text("\n[b]=== Shift %d Started ===[/b]\n" % shift_number)
+	if shift_number == 1:
+		hq_message_log.append_text("[i]Controls: L=Log, E=Escalate, I=Investigate, R=Review Footage | Keys 1-4=Move Player to Zone, 5=Test Self-Sight (late), 0=Test Census[/i]")
 	_update_ui()
 
 func _on_shift_ended(success: bool) -> void:
@@ -148,6 +163,8 @@ func _on_credibility_changed(new_value: float, old_value: float) -> void:
 	var delta = new_value - old_value
 	var sign = "+" if delta > 0 else ""
 	hq_message_log.append_text("\nCredibility: %.0f (%s%.0f)" % [new_value, sign, delta])
+	# Disable escalate if credibility too low (Section 5 consequence)
+	escalate_button.disabled = not CredibilityManager.can_escalate_to_hq()
 
 func _on_hq_response_changed(new_response_type: String) -> void:
 	hq_message_log.append_text("\n[b]HQ Response Type:[/b] %s" % [new_response_type.capitalize()])
@@ -194,7 +211,7 @@ func _on_log_pressed() -> void:
 	hq_message_log.append_text("\nLogged mundane event")
 
 func _on_escalate_pressed() -> void:
-	# Demo: Escalate a potential anomaly
+	# Demo: Escalate a potential anomaly (now resolves with simulated outcome to demo credibility)
 	var report_id = HQReportSystem.create_anomaly_report(
 		"cam_dam_01",
 		"zone_dam",
@@ -202,6 +219,20 @@ func _on_escalate_pressed() -> void:
 		"Equipment appears to have moved between camera cycles"
 	)
 	HQReportSystem.submit_action(report_id, HQReportSystem.AnomalyAction.ESCALATE_HQ)
+	
+	# Simulate HQ resolution for demo purposes (in full game this would be timer-driven or async)
+	# Outcome biased by phase to show escalation curve tension
+	var outcome: int
+	var phase_name = EscalationManager.GamePhase.keys()[EscalationManager.current_phase]
+	if phase_name == "EARLY":
+		outcome = CredibilityManager.ReportOutcome.MUNDANE  # Early: mostly mundane, small cred hit
+	elif phase_name == "MID":
+		outcome = CredibilityManager.ReportOutcome.GENUINE if randf() > 0.4 else CredibilityManager.ReportOutcome.MUNDANE
+	else:
+		outcome = CredibilityManager.ReportOutcome.GENUINE if randf() > 0.2 else CredibilityManager.ReportOutcome.FALSE_ALARM  # Late: riskier, possible false or genuine
+	
+	HQReportSystem.resolve_report(report_id, outcome)
+	hq_message_log.append_text("\n[i](Simulated HQ resolution: %s)[/i]" % ["FALSE_ALARM", "MUNDANE", "GENUINE"][outcome])
 
 func _on_investigate_pressed() -> void:
 	# Demo: Field investigation
@@ -231,6 +262,112 @@ func _on_review_pressed() -> void:
 	
 	FootageArchive.start_review(clip_id)
 	hq_message_log.append_text("\nReviewing archived footage: %s" % clip_id)
+	
+	# Demo scrub to position where anomaly may be (shows Retroactive Dread)
+	if FootageArchive.check_diff_exists(clip_id):
+		var scrub_data = FootageArchive.scrub_to_position(clip_id, 0.5)
+		if scrub_data.has("anomalies_at_position") and not scrub_data.anomalies_at_position.is_empty():
+			hq_message_log.append_text("\n[color=magenta]Scrub result at 50%: Found %d anomaly(s) not in live view![/color]" % scrub_data.anomalies_at_position.size())
 
 func _process(_delta: float) -> void:
 	_update_ui()
+	# Keep CameraSystem in sync with simulated player position (for self-sighting checks)
+	CameraSystem.update_player_position(player_sim_pos)
+
+func _move_player_to_zone(zone_id: String, approx_pos: Vector2) -> void:
+	player_sim_pos = approx_pos
+	player_sim_zone = zone_id
+	ZoneManager.set_player_zone(zone_id)
+	hq_message_log.append_text("\n[color=cyan]Player moved to %s (pos: %.0f,%.0f)[/color]" % [zone_id, approx_pos.x, approx_pos.y])
+	# Chance to trigger bleed or mismatch if in late phase (demo)
+	if EscalationManager.current_phase == EscalationManager.GamePhase.LATE and randf() < 0.3:
+		EscalationManager.trigger_zone_bleed(zone_id, 0.3)
+
+func _test_self_sighting_on_distant_camera() -> void:
+	if EscalationManager.current_phase != EscalationManager.GamePhase.LATE:
+		hq_message_log.append_text("\n[yellow]Self-sighting only possible in LATE game phase (shift 7+)[/yellow]")
+		return
+	var cams = CameraSystem.get_all_cameras()
+	if cams.is_empty():
+		return
+	# Pick a camera the player is NOT near
+	var distant_cam = ""
+	for cam_id in cams:
+		if not CameraSystem.is_player_near_camera(cam_id, 30.0):
+			distant_cam = cam_id
+			break
+	if distant_cam == "":
+		distant_cam = cams[0]  # fallback
+	var success = EscalationManager.trigger_self_sighting(distant_cam)
+	if success:
+		hq_message_log.append_text("\n[red]Self-sighting triggered on %s! Credibility risk high.[/red]" % distant_cam)
+	else:
+		hq_message_log.append_text("\n[yellow]Self-sighting attempt on %s failed (conditions not met).[/yellow]" % distant_cam)
+
+func _trigger_test_census_mismatch() -> void:
+	var zones = ZoneManager.get_all_zones()
+	if zones.is_empty():
+		return
+	var z = zones[randi() % zones.size()]
+	var success = EscalationManager.trigger_census_mismatch(z)
+	hq_message_log.append_text("\n[orange]Manual census mismatch test on %s: %s[/orange]" % [z, "triggered" if success else "already triggered this shift"])
+
+func _populate_zone_panel() -> void:
+	"""Adds simple zone status labels to the ZonePanel for visual reference."""
+	if not zone_panel:
+		return
+	# Clear existing children if re-called
+	for child in zone_panel.get_children():
+		child.queue_free()
+	
+	var vbox = VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	zone_panel.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "Zones (Risk Tier | Bleed | NPCs)"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+	
+	for zone_id in ZoneManager.get_all_zones():
+		var profile = ZoneManager.get_zone(zone_id)
+		if not profile:
+			continue
+		var lbl = Label.new()
+		var bleed = "BLEED" if ZoneManager.is_zone_bleeding(zone_id) else "stable"
+		lbl.text = "%s: Tier %d | %s | NPCs:%d" % [
+			profile.zone_name, profile.risk_tier, bleed, profile.expected_npc_count
+		]
+		lbl.add_theme_color_override("font_color", Color(0.8, 0.9, 0.7))
+		vbox.add_child(lbl)
+	
+	# Note: in full game this would update live on signals
+	zone_panel.visible = true
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Wire up project.godot input actions for polish
+	if event.is_action_pressed("log_anomaly"):
+		_on_log_pressed()
+	elif event.is_action_pressed("escalate_hq"):
+		_on_escalate_pressed()
+	elif event.is_action_pressed("investigate_field"):
+		_on_investigate_pressed()
+	elif event.is_action_pressed("review_footage"):
+		_on_review_pressed()
+	elif event.is_action_pressed("toggle_camera_board"):
+		hq_message_log.append_text("\n[i]Camera board toggled (demo placeholder)[/i]")
+	# Quick debug keys for player sim movement and self-sight test (not in input map but useful)
+	elif event is InputEventKey and event.pressed:
+		match event.keycode:
+			KEY_1:
+				_move_player_to_zone("zone_north", Vector2(10, 10))
+			KEY_2:
+				_move_player_to_zone("zone_tower", Vector2(150, 80))
+			KEY_3:
+				_move_player_to_zone("zone_dam", Vector2(300, 200))
+			KEY_4:
+				_move_player_to_zone("zone_edge", Vector2(500, 300))
+			KEY_5:
+				_test_self_sighting_on_distant_camera()
+			KEY_0:
+				_trigger_test_census_mismatch()
